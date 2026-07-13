@@ -13,23 +13,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install and Configure OCI CLI
+      - name: Install OCI CLI Via Pip
         run: |
-          # 1. 安装官方 OCI CLI 工具
-          bash -c "$(curl -L https://githubusercontent.com) --accept-all-defaults"
+          # 1. 直接使用 Python 的 pip 极速本地安装，完全避开官方不稳定的 sh 下载链接
+          pip install oci-cli --upgrade
           
-          # 2. 将 OCI 添加到系统环境变量路径中
-          echo "/home/runner/bin" >> $GITHUB_PATH
-          export PATH=$PATH:/home/runner/bin
-          
-          # 3. 创建 OCI 密钥目录
+          # 2. 创建配置目录
           mkdir -p ~/.oci
           
-          # 4. 写入私钥内容
+          # 3. 写入私钥内容
           echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
           
-          # 5. 自动生成并写入 OCI 配置文件
+          # 4. 生成 OCI 配置文件
           cat << EOF > ~/.oci/config
           [DEFAULT]
           user=${{ secrets.OCI_CLI_USER }}
@@ -47,8 +43,8 @@ jobs:
           # 1. 生成临时的 SSH 公钥文件
           echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
           
-          # 2. 执行原始 OCI 创建命令
-          /home/runner/bin/oci compute instance launch \
+          # 2. 调用全局命名的 oci 工具直接发起创建
+          oci compute instance launch \
             --availability-domain "${{ secrets.AD_NAME }}" \
             --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
             --shape "VM.Standard.A1.Flex" \
