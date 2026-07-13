@@ -21,6 +21,7 @@ jobs:
         id: create-vm
         continue-on-error: true
         with:
+          silent: false # ✨ 核心修改：允许在 GitHub 日志里打印出甲骨文最真实的报错文字
           command: >
             compute instance launch 
             --availability-domain "${{ secrets.AD_NAME }}" 
