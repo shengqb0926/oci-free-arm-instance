@@ -1,9 +1,7 @@
 name: Try to Create OCI VM
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/10 * * * *'
+  workflow_dispatch: # 保持手动触发，每天手动点击一次即可
 
 jobs:
   create-instance:
@@ -36,35 +34,60 @@ jobs:
           EOF
           chmod 600 ~/.oci/config
 
-      - name: Send Create Instance Command to OCI
-        id: create-vm
-        continue-on-error: true
+      - name: Loop Create OCI Instance
         run: |
           # 1. 生成临时的 SSH 公钥文件
           echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
-          
-          # 2. 调用全局命名的 oci 工具直接发起创建
-          oci compute instance launch \
-            --availability-domain "${{ secrets.AD_NAME }}" \
-            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
-            --shape "VM.Standard.A1.Flex" \
-            --shape-config '{"ocpus": 2, "memoryInGBs": 12}' \
-            --image-id "${{ secrets.IMAGE_ID }}" \
-            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
-            --assign-public-ip true \
-            --display-name "coolify-vm" \
-            --boot-volume-size-in-gbs 100 \
-            --ssh-authorized-keys-file /tmp/ssh_key.pub
 
-      - name: Send Status Notification to Discord
-        run: |
-          if [ "${{ steps.create-vm.outcome }}" = "success" ]; then
-            MESSAGE="🟢 【成功】实例创建成功！"
-          else
-            MESSAGE="🔴 【失败】容量不足，将自动重试。"
+          # 定义循环计数器
+          COUNTER=1
+          MAX_RUNS=35 # 35次 * 10分钟 = 350分钟（约5.8小时，留10分钟余量防止超时）
+          SUCCESS=false
+
+          while [ $COUNTER -le $MAX_RUNS ]
+          do
+            echo "=========================================="
+            echo "时间: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "正在进行第 $COUNTER / $MAX_RUNS 次尝试创建 OCI 实例..."
+            echo "=========================================="
+
+            # 调用全局命名的 oci 工具发起创建（移除外层的 continue-on-error，改用标准 shell 捕获）
+            if oci compute instance launch \
+              --availability-domain "${{ secrets.AD_NAME }}" \
+              --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
+              --shape "VM.Standard.A1.Flex" \
+              --shape-config '{"ocpus": 2, "memoryInGBs": 12}' \
+              --image-id "${{ secrets.IMAGE_ID }}" \
+              --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
+              --assign-public-ip true \
+              --display-name "coolify-vm" \
+              --boot-volume-size-in-gbs 100 \
+              --ssh-authorized-keys-file /tmp/ssh_key.pub; then
+              
+              # 运行成功的分支
+              MESSAGE="🟢 【成功】第 $COUNTER 次尝试：实例创建成功！"
+              curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"${MESSAGE}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
+              SUCCESS=true
+              break # 抢到了！立刻跳出死循环，结束工作流
+            else
+              # 运行失败的分支（通常是 Out of Capacity）
+              MESSAGE="🔴 【失败】第 $COUNTER 次尝试：容量不足，10分钟后自动重试。"
+              curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"${MESSAGE}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
+            fi
+
+            # 如果已经是最后一次循环，就不再等待
+            if [ $COUNTER -eq $MAX_RUNS ]; then
+              echo "已达到本次工作流最大运行次数。"
+              break
+            fi
+
+            echo "等待 10 分钟（600秒）后进行下一次尝试..."
+            COUNTER=$((COUNTER + 1))
+            sleep 600
+          done
+
+          # 最终状态判定：如果整个循环结束依然没有成功，抛出异常让 GitHub Actions 图标变红
+          if [ "$SUCCESS" = false ]; then
+            echo "很遗憾，本轮 6 小时内未能抢到实例。"
+            exit 1
           fi
-          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"${MESSAGE}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
-
-      - name: Check Final Status
-        run: |
-          if [ "${{ steps.create-vm.outcome }}" != "success" ]; then exit 1; fi
