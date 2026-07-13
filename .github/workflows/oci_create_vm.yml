@@ -8,30 +8,47 @@ on:
 jobs:
   create-instance:
     runs-on: ubuntu-latest
-    env:
-      OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
-      OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
-      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
-      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
-      OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
 
     steps:
-      # 第一步：依然使用官方 Action，但仅让它帮我们自动在后台配置和初始化好 OCI CLI 运行环境
-      - name: Initialize OCI CLI
-        uses: oracle-actions/run-oci-cli-command@v1.3.2
-        with:
-          command: 'version' # 仅用来初始化并打印版本，确保环境绝对可用
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # 第二步：使用 GitHub 原生的 bash 环境，自由地生成密钥并直接调用 oci 原始命令
+      - name: Install and Configure OCI CLI
+        run: |
+          # 1. 安装官方 OCI CLI 工具
+          bash -c "$(curl -L https://githubusercontent.com) --accept-all-defaults"
+          
+          # 2. 将 OCI 添加到系统环境变量路径中
+          echo "/home/runner/bin" >> $GITHUB_PATH
+          export PATH=$PATH:/home/runner/bin
+          
+          # 3. 创建 OCI 密钥目录
+          mkdir -p ~/.oci
+          
+          # 4. 写入私钥内容
+          echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+          
+          # 5. 自动生成并写入 OCI 配置文件
+          cat << EOF > ~/.oci/config
+          [DEFAULT]
+          user=${{ secrets.OCI_CLI_USER }}
+          fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}
+          tenancy=${{ secrets.OCI_CLI_TENANCY }}
+          region=${{ secrets.OCI_CLI_REGION }}
+          key_file=~/.oci/oci_api_key.pem
+          EOF
+          chmod 600 ~/.oci/config
+
       - name: Send Create Instance Command to OCI
         id: create-vm
         continue-on-error: true
         run: |
-          # 1. 将 SSH 密钥写入临时文件
+          # 1. 生成临时的 SSH 公钥文件
           echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
           
-          # 2. 直接调用配置好的 oci 命令行进行创建
-          oci compute instance launch \
+          # 2. 执行原始 OCI 创建命令
+          /home/runner/bin/oci compute instance launch \
             --availability-domain "${{ secrets.AD_NAME }}" \
             --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
             --shape "VM.Standard.A1.Flex" \
