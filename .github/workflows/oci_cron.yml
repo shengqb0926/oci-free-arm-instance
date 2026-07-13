@@ -1,28 +1,48 @@
+name: Try to Create OCI VM
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *' # 每 10 分钟自动尝试
+
 jobs:
-  my-instances:
+  create-instance:
     runs-on: ubuntu-latest
-    name: List the display name and shape of the instances in my compartment
     env:
       OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
       OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
       OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
       OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
       OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+
     steps:
-      - name: Retrieve the OCID of a named compartment in tenancy
+      - name: Send Create Instance Command to OCI
         uses: oracle-actions/run-oci-cli-command@v1.3.2
-        id: find-compartment-id
+        id: create-vm
+        continue-on-error: true
         with:
-          command: 'iam compartment list --compartment-id-in-subtree=true'
-          query: "data[?name=='testing'].id"
+          command: >
+            compute instance launch 
+            --availability-domain "${{ secrets.AD_NAME }}" 
+            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" 
+            --shape "VM.Standard.A1.Flex" 
+            --shape-config '{"ocpus": 2, "memoryInGBs": 12}' 
+            --image-id "${{ secrets.IMAGE_ID }}" 
+            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" 
+            --assign-public-ip true 
+            --display-name "coolify-vm" 
+            --boot-volume-size-in-gbs 100 
+            --ssh-authorized-keys "${{ secrets.SSH_PUBLIC_KEY }}"
 
-      - name: Retrieve the display name and shape of the instances in my compartment
-        uses: oracle-actions/run-oci-cli-command@v1.3.2
-        id: find-instances
-        with:
-          command: 'compute instance list --compartment-id ${{ steps.find-compartment-id.outputs.raw_output }}'
-          query: 'data[*].{name: \"display-name\", shape: shape}'
-
-      - name: List the display name and shape of the instances in my compartment
+      - name: Send Status Notification to Discord
         run: |
-          echo ${{ steps.find-instances.outputs.output }} | jq .
+          if [ "${{ steps.create-vm.outcome }}" = "success" ]; then
+            MESSAGE="🟢 【成功】实例创建成功！"
+          else
+            MESSAGE="🔴 【失败】容量不足，将自动重试。"
+          fi
+          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"${MESSAGE}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
+
+      - name: Check Final Status
+        run: |
+          if [ "${{ steps.create-vm.outcome }}" != "success" ]; then exit 1; fi
