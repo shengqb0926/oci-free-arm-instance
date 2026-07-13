@@ -3,7 +3,7 @@ name: Try to Create OCI VM
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *' # 每 10 分钟自动尝试
+    - cron: '*/10 * * * *'
 
 jobs:
   create-instance:
@@ -21,19 +21,22 @@ jobs:
         id: create-vm
         continue-on-error: true
         with:
-          silent: false # ✨ 核心修改：允许在 GitHub 日志里打印出甲骨文最真实的报错文字
+          silent: false
           command: >
-            compute instance launch 
+            bash -c '
+            echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub &&
+            oci compute instance launch 
             --availability-domain "${{ secrets.AD_NAME }}" 
             --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" 
             --shape "VM.Standard.A1.Flex" 
-            --shape-config '{"ocpus": 2, "memoryInGBs": 12}' 
+            --shape-config "{\"ocpus\": 2, \"memoryInGBs\": 12}" 
             --image-id "${{ secrets.IMAGE_ID }}" 
             --subnet-id "${{ secrets.OCI_SUBNET_ID }}" 
             --assign-public-ip true 
             --display-name "coolify-vm" 
             --boot-volume-size-in-gbs 100 
-            --ssh-authorized-keys "${{ secrets.SSH_PUBLIC_KEY }}"
+            --ssh-authorized-keys-file /tmp/ssh_key.pub
+            '
 
       - name: Send Status Notification to Discord
         run: |
