@@ -16,27 +16,32 @@ jobs:
       OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
 
     steps:
-      - name: Send Create Instance Command to OCI
+      # 第一步：依然使用官方 Action，但仅让它帮我们自动在后台配置和初始化好 OCI CLI 运行环境
+      - name: Initialize OCI CLI
         uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: 'version' # 仅用来初始化并打印版本，确保环境绝对可用
+
+      # 第二步：使用 GitHub 原生的 bash 环境，自由地生成密钥并直接调用 oci 原始命令
+      - name: Send Create Instance Command to OCI
         id: create-vm
         continue-on-error: true
-        with:
-          silent: false
-          command: >
-            bash -c '
-            echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub &&
-            oci compute instance launch 
-            --availability-domain "${{ secrets.AD_NAME }}" 
-            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" 
-            --shape "VM.Standard.A1.Flex" 
-            --shape-config "{\"ocpus\": 2, \"memoryInGBs\": 12}" 
-            --image-id "${{ secrets.IMAGE_ID }}" 
-            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" 
-            --assign-public-ip true 
-            --display-name "coolify-vm" 
-            --boot-volume-size-in-gbs 100 
+        run: |
+          # 1. 将 SSH 密钥写入临时文件
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
+          
+          # 2. 直接调用配置好的 oci 命令行进行创建
+          oci compute instance launch \
+            --availability-domain "${{ secrets.AD_NAME }}" \
+            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
+            --shape "VM.Standard.A1.Flex" \
+            --shape-config '{"ocpus": 2, "memoryInGBs": 12}' \
+            --image-id "${{ secrets.IMAGE_ID }}" \
+            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
+            --assign-public-ip true \
+            --display-name "coolify-vm" \
+            --boot-volume-size-in-gbs 100 \
             --ssh-authorized-keys-file /tmp/ssh_key.pub
-            '
 
       - name: Send Status Notification to Discord
         run: |
